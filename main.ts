@@ -39,3 +39,47 @@ writeFileSync(
     game_path_max_bytes: 1000,
   }),
 );
+
+// Pre-flight validation (authored for WARTEG RUSH): after the hand-in is written, walk the output
+// and confirm the scorer's caps really hold — the game/ tree within its file-count and total-byte
+// caps, every screenshot within its size cap and the count within the maximum, and the dossier on
+// disk present and parseable as JSON. Any breach throws, so an over-cap hand-in fails loudly here
+// instead of travelling to the scorer only to be refused there.
+const { readdirSync, readFileSync, statSync } = await import('node:fs');
+
+const gameDir = join(out, 'game');
+let gameFiles = 0;
+let gameBytes = 0;
+const walkGame = (dir) => {
+  for (const name of readdirSync(dir)) {
+    const p = join(dir, name);
+    const st = statSync(p);
+    if (st.isDirectory()) walkGame(p);
+    else {
+      gameFiles += 1;
+      gameBytes += st.size;
+    }
+  }
+};
+walkGame(gameDir);
+if (gameFiles > 993) throw new Error(`pre-flight: game/ holds ${gameFiles} files, over the 993 file cap`);
+if (gameBytes > 50331648) throw new Error(`pre-flight: game/ totals ${gameBytes} bytes, over the 48 MiB cap`);
+
+const shotsDir = join(out, 'screenshots');
+const shotNames = existsSync(shotsDir) ? readdirSync(shotsDir) : [];
+if (shotNames.length > 4) throw new Error(`pre-flight: ${shotNames.length} screenshots, over the maximum of 4`);
+let largestShot = 0;
+for (const name of shotNames) {
+  const size = statSync(join(shotsDir, name)).size;
+  if (size > largestShot) largestShot = size;
+  if (size > 262144) throw new Error(`pre-flight: screenshot ${name} is ${size} bytes, over the 262144 byte cap`);
+}
+
+const dossierPath = join(out, 'dossier.json');
+if (!existsSync(dossierPath)) throw new Error('pre-flight: dossier.json is missing from the output');
+JSON.parse(readFileSync(dossierPath, 'utf8'));
+
+console.log(
+  `pre-flight ok: game/ ${gameFiles} files, ${gameBytes} bytes (caps 993 files, 50331648 bytes); ` +
+    `screenshots ${shotNames.length} of max 4, largest ${largestShot} bytes (cap 262144); dossier.json parses`,
+);
